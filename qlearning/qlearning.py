@@ -15,36 +15,51 @@ class QLearner:
         self.alpha = alpha
         self.gamma = gamma
         self.eps = eps
+
         self.q = {}
         self.prev_state = None
         self.prev_action = None
 
-    def action_value(self, state, action):
+    def _action_value(self, state, action):
         return self.q.get((state, action), 1e-3*np.random.randn())
 
     def _get_action(self, state, eps):
         if np.random.rand() < eps:
             return np.random.choice(self.actions)
-        qs = {(action, self.action_value(state=state, action=action)) for action in self.actions}
+        qs = {(action, self._action_value(state=state, action=action)) for action in self.actions}
         action = max(qs, key = lambda x: x[1])
         return action[0]
 
-    def update(self, state, reward):
-        q = self.action_value(state=self.prev_state, action=self.prev_action)
+    def update(self, next_state, reward):
+        """ Update state-action value of previous (state, action).
+        
+        - `next_state`: the new state.
+        - `reward`: reward received upon the transaction to `next_state` from previous state.
+        """
+        q = self._action_value(state=self.prev_state, action=self.prev_action)
         tmp = reward - q
-        tmp += self.gamma * self.action_value(state, self._get_action(state, 0))
+        tmp += self.gamma * self._action_value(next_state, self._get_action(next_state, 0))
         self.q[(self.prev_state, self.prev_action)] = q + self.alpha * tmp
-        self.prev_state = state
+        self.prev_state = next_state
 
-    def take_action(self, state):
-        action = self._get_action(state, self.eps)
+    def take_action(self, current_state):
+        """ Choose an eps-greedy action to be taken when current state is `current_state`. """
+
+        action = self._get_action(current_state, self.eps)
         self.prev_action = action
         return action
 
     def save(self, path):
+        """ Load state-action value table in `path`.npy """
+
         np.save(join(_HERE, path + '.npy'), self.q)
 
     def load(self, path):
+        """ Load state-action value table.
+        
+        If it doesn't exist, use random q-value.
+        """
+
         try:
             self.q = np.load(join(_HERE, path + '.npy'), allow_pickle='TRUE').item()
         except:
