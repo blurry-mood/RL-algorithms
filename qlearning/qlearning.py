@@ -104,12 +104,12 @@ if __name__ == '__main__':
             state = tuple(map(tuple, state[STATE[0]]))
 
             qlearner.update(state, reward)
-            arr = env.render('ansi')
-            print(arr.replace(" ", "").replace("\n\n", ''))
-            
-            print('='*20, f'{action=}, {reward=}, {done=}')
             if done:
                 break
+
+            arr = env.render('ansi')
+            print(arr.replace(" ", "").replace("\n\n", ''))            
+            print('='*20, f'{action=}, {reward=}, {done=}')
 
         qlearner.save('qlearner')
         print('>'*40, f'Episode {i+1} is finished in {n} steps')
