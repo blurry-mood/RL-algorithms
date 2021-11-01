@@ -30,10 +30,21 @@ class NSarsa:
         action = max(qs, key = lambda x: x[1])
         return action[0]
 
-    def update(self, reward):
+    def _end_episode(self):
+        for __ in range(len(self.sar)):
+            q = self._action_value(state=self.sar[0][0], action=self.sar[0][1])
+            G = 0
+            for i, (*_, reward) in enumerate(self.sar):
+                G += (self.gamma**i) * reward
+            self.q[self.sar[0][0], self.sar[0][1]] = q + self.alpha * (G - q)
+            
+            del self.sar[0]
+
+    def update(self, reward, done:bool):
         """ Update state-action value of previous (state, action).
         
         - `reward`: reward received upon the transaction to `next_state` from previous state.
+        - `done`: boolean specifying whether the episode ended.
         """
         self.sar[-1][-1] = reward
         if len(self.sar) < self.n + 1:
@@ -46,6 +57,10 @@ class NSarsa:
         self.q[self.sar[0][0], self.sar[0][1]] = q + self.alpha * (G - q)
 
         del self.sar[0]
+        
+        # if this is end of episode, update q-values using n-1/n-2/.../1-step sarsa
+        if done:
+            self._end_episode()
 
     def take_action(self, current_state):
         """ Choose an eps-greedy action to be taken when current state is `current_state`. """
@@ -73,7 +88,7 @@ class NSarsa:
 if __name__ == '__main__':
     ALPHA = 1e-1
     GAMMA = 9e-1
-    EPS = 5e-1
+    EPS = 9e-1
     N = 2
     ITERS = 20
 
@@ -109,14 +124,15 @@ if __name__ == '__main__':
             state, reward, done, info = env.step(action)
             state = tuple(map(tuple, state[STATE[0]]))
 
-            nsarsa.update(reward)
+            nsarsa.update(reward, done)
 
-            arr = env.render('ansi')
-            print(arr.replace(" ", "").replace("\n\n", ''))
-            
-            print('='*20, f'{action=}, {reward=}, {done=}')
             if done:
                 break
+
+            arr = env.render('ansi')
+            print(arr.replace(" ", "").replace("\n\n", ''))            
+            print('='*20, f'{action=}, {reward=}, {done=}')
+
 
         nsarsa.save('nsarsa')
         print('>'*40, f'Episode {i+1} is finished in {n} steps')
