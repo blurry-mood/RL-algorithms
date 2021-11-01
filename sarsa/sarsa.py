@@ -29,10 +29,11 @@ class Sarsa:
         action = max(qs, key = lambda x: x[1])
         return action[0]
 
-    def update(self, reward):
+    def update(self, reward, done:bool):
         """ Update state-action value of previous (state, action).
         
         - `reward`: reward received upon the transaction to `next_state` from previous state.
+        - `done`: boolean specifying whether the episode ended.
         """
         self.sar[-1][-1] = reward
         if len(self.sar) < 2:
@@ -44,6 +45,10 @@ class Sarsa:
         self.q[(self.sar[0][0], self.sar[0][1])] = q + self.alpha * tmp
 
         del self.sar[0]
+
+        if done:
+            self.q[(self.sar[0][0], self.sar[0][1])] = q + self.alpha * (self.sar[0][2] - 1)
+
 
     def take_action(self, current_state):
         """ Choose an eps-greedy action to be taken when current state is `current_state`. """
@@ -105,14 +110,14 @@ if __name__ == '__main__':
             state, reward, done, info = env.step(action)
             state = tuple(map(tuple, state[STATE[0]]))
 
-            sarsa.update(reward)
+            sarsa.update(reward, done)
 
-            arr = env.render('ansi')
-            print(arr.replace(" ", "").replace("\n\n", ''))
-            
-            print('='*20, f'{action=}, {reward=}, {done=}')
             if done:
                 break
+
+            arr = env.render('ansi')
+            print(arr.replace(" ", "").replace("\n\n", ''))            
+            print('='*20, f'{action=}, {reward=}, {done=}')
 
         sarsa.save('sarsa')
         print('>'*40, f'Episode {i+1} is finished in {n} steps')
