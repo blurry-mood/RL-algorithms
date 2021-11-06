@@ -2,6 +2,8 @@ import gym
 import minihack
 from nle import nethack
 
+import rl_minihack
+
 import numpy as np
 import time
 
@@ -9,6 +11,12 @@ from os.path import join, split
 _HERE = split(__file__)[0]
 
 class Sarsa:
+    """ Possible observations:
+    
+    ['glyphs', 'chars', 'colors', 'specials', 'glyphs_crop', 'pixel'
+    'chars_crop', 'colors_crop', 'specials_crop', 'blstats', 'message']
+    """
+    _STATE = 'chars_crop'
 
     def __init__(self, actions, alpha, gamma, eps):
         self.actions = actions
@@ -47,11 +55,12 @@ class Sarsa:
         del self.sar[0]
 
         if done:
-            self.q[(self.sar[0][0], self.sar[0][1])] = q + self.alpha * (self.sar[0][2] - 1)
+            self.q[(self.sar[0][0], self.sar[0][1])] = q + self.alpha * (self.sar[0][2] - q)
 
 
     def take_action(self, current_state):
         """ Choose an eps-greedy action to be taken when current state is `current_state`. """
+        current_state = tuple(map(tuple, current_state[self._STATE]))
         action = self._get_action(current_state, self.eps)
         self.sar.append([current_state, action, 0])
         return action
@@ -70,55 +79,39 @@ class Sarsa:
         try:
             self.q = np.load(join(_HERE, path + '.npy'), allow_pickle='TRUE').item()
         except:
-            print("No saved learner is found under:", path)
+            print("============> No saved learner is found under:", path)
             time.sleep(2)
 
 if __name__ == '__main__':
     ALPHA = 1e-1
     GAMMA = 9e-1
     EPS = 5e-1
-    ITERS = 20
+    ITERS = 2
     
-    MOVE_ACTIONS = list(range(len(nethack.CompassDirection)))
-
-    """ Possible observations:
-    
-    ['glyphs', 'chars', 'colors', 'specials', 'glyphs_crop', 
-    'chars_crop', 'colors_crop', 'specials_crop', 'blstats', 'message']
-    """
-    STATE = ('chars_crop', 'pixel', 'message' )
-
-    sarsa = Sarsa(MOVE_ACTIONS, ALPHA, GAMMA, EPS)
-
     env = gym.make(
         id="MiniHack-Room-5x5-v0",
-        observation_keys=STATE,
         max_episode_steps=100_000_000,
         obs_crop_h=5,
-        obs_crop_w=5
+        obs_crop_w=5,
+        observation_keys=('chars_crop', 'pixel')
     )
+
+    sarsa = Sarsa(list(range(env.action_space.n)), ALPHA, GAMMA, EPS)
+    sarsa.load('sarsa')
 
     for i in range(ITERS):
         state = env.reset()
-        state = tuple(map(tuple, state[STATE[0]]))
+        env.render(state, 1e-1)
         n = 0
-        sarsa.load('sarsa')
-        while True:
+        done = False
+        while not done:
             n += 1
             action = sarsa.take_action(state)
-
             state, reward, done, info = env.step(action)
-            state = tuple(map(tuple, state[STATE[0]]))
+            sarsa.update(reward, done)                
+            env.render(state)
 
-            sarsa.update(reward, done)
+        print('>'*20, f'Episode {i+1} is finished in {n} steps')
 
-            if done:
-                break
-
-            arr = env.render('ansi')
-            print(arr.replace(" ", "").replace("\n\n", ''))            
-            print('='*20, f'{action=}, {reward=}, {done=}')
-
-        sarsa.save('sarsa')
-        print('>'*40, f'Episode {i+1} is finished in {n} steps')
-        time.sleep(2)
+    rl_minihack.stop_rendering()
+    sarsa.save('sarsa')
