@@ -2,6 +2,8 @@ import gym
 import minihack
 from nle import nethack
 
+import rl_minihack
+
 import numpy as np
 import time
 
@@ -9,6 +11,12 @@ from os.path import join, split
 _HERE = split(__file__)[0]
 
 class QLearner:
+    """ Possible observations:
+    
+    ['glyphs', 'chars', 'colors', 'specials', 'glyphs_crop', 'pixel'
+    'chars_crop', 'colors_crop', 'specials_crop', 'blstats', 'message']
+    """
+    _STATE = 'chars_crop'
 
     def __init__(self, actions, alpha, gamma, eps):
         self.actions = actions
@@ -36,6 +44,7 @@ class QLearner:
         - `next_state`: the new state.
         - `reward`: reward received upon the transaction to `next_state` from previous state.
         """
+        next_state = tuple(map(tuple, next_state[self._STATE]))
         q = self._action_value(state=self.prev_state, action=self.prev_action)
         tmp = reward - q
         tmp += self.gamma * self._action_value(next_state, self._get_action(next_state, 0))
@@ -44,7 +53,7 @@ class QLearner:
 
     def take_action(self, current_state):
         """ Choose an eps-greedy action to be taken when current state is `current_state`. """
-
+        current_state = tuple(map(tuple, current_state[self._STATE]))
         action = self._get_action(current_state, self.eps)
         self.prev_action = action
         return action
@@ -71,46 +80,32 @@ if __name__ == '__main__':
     GAMMA = 9e-1
     EPS = 9e-2
     ITERS = 20
-    
-    MOVE_ACTIONS = list(range(len(nethack.CompassDirection)))
-
-    """ Possible observations:
-    
-    ['glyphs', 'chars', 'colors', 'specials', 'glyphs_crop', 
-    'chars_crop', 'colors_crop', 'specials_crop', 'blstats', 'message']
-    """
-    STATE = ('chars_crop', 'pixel', 'message' )
-
-    qlearner = QLearner(MOVE_ACTIONS, ALPHA, GAMMA, EPS)
 
     env = gym.make(
         id="MiniHack-Room-5x5-v0",
-        observation_keys=STATE,
         max_episode_steps=100_000_000,
         obs_crop_h=5,
         obs_crop_w=5,   
+        observation_keys=('chars_crop', 'pixel')
     )
+
+    qlearner = QLearner(list(range(env.action_space.n)), ALPHA, GAMMA, EPS)
+    qlearner.load('qlearner')
 
     for i in range(ITERS):
         state = env.reset()
-        state = tuple(map(tuple, state[STATE[0]]))
+        env.render(state, 1e-1)
         n = 0
-        qlearner.load('qlearner')
-        while True:
+        done = False
+        while not done:
             n += 1
             action = qlearner.take_action(state)
-
             state, reward, done, info = env.step(action)
-            state = tuple(map(tuple, state[STATE[0]]))
-
             qlearner.update(state, reward)
-            if done:
-                break
+            env.render(state)
 
-            arr = env.render('ansi')
-            print(arr.replace(" ", "").replace("\n\n", ''))            
-            print('='*20, f'{action=}, {reward=}, {done=}')
-
-        qlearner.save('qlearner')
         print('>'*40, f'Episode {i+1} is finished in {n} steps')
-        time.sleep(2)
+
+    rl_minihack.stop_rendering()
+    qlearner.save('qlearner')
+
