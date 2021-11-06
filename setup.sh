@@ -11,7 +11,17 @@ sudo apt-get update && apt-get --allow-unauthenticated install -y \
 
 python3 -m venv venv
 source venv/bin/activate
+
+# install NLE
 pip install nle
 
 # install MiniHack
 pip install minihack
+
+# update `render` method to visualize pixels
+pip install ./utils/
+
+# other dependencies
+pip install torchvision
+pip install matplotlib
+pip install PyQt5
