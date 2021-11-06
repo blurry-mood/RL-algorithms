@@ -2,6 +2,8 @@ import gym
 import minihack
 from nle import nethack
 
+import rl_minihack
+
 import numpy as np
 import time
 
@@ -9,6 +11,12 @@ from os.path import join, split
 _HERE = split(__file__)[0]
 
 class NSarsa:
+    """ Possible observations:
+    
+    ['glyphs', 'chars', 'colors', 'specials', 'glyphs_crop', 'pixel'
+    'chars_crop', 'colors_crop', 'specials_crop', 'blstats', 'message']
+    """
+    _STATE = 'chars_crop'
 
     def __init__(self, actions, alpha, gamma, eps, n):
         self.actions = actions
@@ -64,6 +72,7 @@ class NSarsa:
 
     def take_action(self, current_state):
         """ Choose an eps-greedy action to be taken when current state is `current_state`. """
+        current_state = tuple(map(tuple, current_state[self._STATE]))        
         action = self._get_action(current_state, self.eps)
         self.sar.append([current_state, action, 0])
         return action
@@ -88,52 +97,33 @@ class NSarsa:
 if __name__ == '__main__':
     ALPHA = 1e-1
     GAMMA = 9e-1
-    EPS = 9e-1
-    N = 2
-    ITERS = 20
-
+    EPS = 5e-1
+    N = 3
+    ITERS = 2
     
-    MOVE_ACTIONS = list(range(len(nethack.CompassDirection)))
-
-    """ Possible observations:
-    
-    ['glyphs', 'chars', 'colors', 'specials', 'glyphs_crop', 
-    'chars_crop', 'colors_crop', 'specials_crop', 'blstats', 'message']
-    """
-    STATE = ('chars_crop', 'pixel', 'message' )
-
-    nsarsa = NSarsa(MOVE_ACTIONS, ALPHA, GAMMA, EPS, N)
-
     env = gym.make(
         id="MiniHack-Room-5x5-v0",
-        observation_keys=STATE,
         max_episode_steps=100_000_000,
         obs_crop_h=5,
-        obs_crop_w=5
+        obs_crop_w=5,
+        observation_keys=('chars_crop', 'pixel')
     )
+    nsarsa = NSarsa(list(range(env.action_space.n)), ALPHA, GAMMA, EPS, N)
+    nsarsa.load('nsarsa')
 
     for i in range(ITERS):
         state = env.reset()
-        state = tuple(map(tuple, state[STATE[0]]))
+        env.render(state, 1e-1)
         n = 0
-        nsarsa.load('nsarsa')
-        while True:
+        done = False
+        while not done:
             n += 1
             action = nsarsa.take_action(state)
-
             state, reward, done, info = env.step(action)
-            state = tuple(map(tuple, state[STATE[0]]))
+            nsarsa.update(reward, done)                
+            env.render(state)
 
-            nsarsa.update(reward, done)
-
-            if done:
-                break
-
-            arr = env.render('ansi')
-            print(arr.replace(" ", "").replace("\n\n", ''))            
-            print('='*20, f'{action=}, {reward=}, {done=}')
-
-
-        nsarsa.save('nsarsa')
         print('>'*40, f'Episode {i+1} is finished in {n} steps')
-        time.sleep(2)
+
+    rl_minihack.stop_rendering()
+    nsarsa.save('nsarsa')
