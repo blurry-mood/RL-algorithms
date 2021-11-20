@@ -6,9 +6,17 @@ import numpy as np
 import time
 
 from os.path import join, split
+
+import rl_minihack
 _HERE = split(__file__)[0]
 
 class MonteCarlo:
+    """ Possible observations:
+
+    ['glyphs', 'chars', 'colors', 'specials', 'glyphs_crop', 'pixel'
+    'chars_crop', 'colors_crop', 'specials_crop', 'blstats', 'message']
+    """
+    _STATE = 'chars_crop'
 
     def __init__(self, actions, gamma, eps):
         self.actions = actions
@@ -29,9 +37,11 @@ class MonteCarlo:
         return action[0]
 
     def record(self, state, action, reward):
+        state = tuple(map(tuple, state[self._STATE]))
         self.state_action_reward.append((state, action, reward))
 
     def take_action(self, state):
+        state = tuple(map(tuple, state[self._STATE]))
         return self._get_action(state, self.eps)
 
     def end_episode(self):
@@ -41,7 +51,7 @@ class MonteCarlo:
             n = self.n.get((s,a), 0)
             q = self.q.get((s,a),0)
             self.q[s, a] = G/(n+1) + n/(n+1)*q
-        self.state_action_reward = []            
+        self.state_action_reward = []
 
     def save(self, path):
         np.save(join(_HERE, path + '.npy'), self.q)
@@ -58,47 +68,34 @@ if __name__ == '__main__':
     EPS = 9e-2
     ITERS = 20
     
-    MOVE_ACTIONS = list(range(len(nethack.CompassDirection)))
-
-    """ Possible observations:
-    
-    ['glyphs', 'chars', 'colors', 'specials', 'glyphs_crop', 
-    'chars_crop', 'colors_crop', 'specials_crop', 'blstats', 'message']
-    """
-    STATE = ('chars_crop', 'pixel', 'message' )
-
-    montecarlo = MonteCarlo(MOVE_ACTIONS, GAMMA, EPS)
-
-    env = gym.make(
+    env=gym.make(
         id="MiniHack-Room-5x5-v0",
-        observation_keys=STATE,
         max_episode_steps=100_000_000,
         obs_crop_h=5,
-        obs_crop_w=5,   
+        obs_crop_w=5,
+        observation_keys=('chars_crop', 'pixel')
     )
+
+    montecarlo = MonteCarlo(list(range(env.action_space.n)), GAMMA, EPS)
+    montecarlo.load('montecarlo')
+
 
     for i in range(ITERS):
         state = env.reset()
-        state = tuple(map(tuple, state[STATE[0]]))
-        n = 0
-        montecarlo.load('montecarlo')
-        while True:
+        env.render(state, 1e-1)
+        n=0
+        done=False
+        while not done:
             n += 1
             action = montecarlo.take_action(state)
 
             _state, reward, done, info = env.step(action)
-            _state = tuple(map(tuple, _state[STATE[0]]))
-
             montecarlo.record(state, action, reward)
             state = _state
+            env.render(state)
 
-            arr = env.render('ansi')            
-            print(arr.replace(" ", "").replace("\n\n", ''))            
-            print('='*20, f'{action=}, {reward=}, {done=}')
-            if done:
-                break
-        
-        montecarlo.end_episode()
-        montecarlo.save('montecarlo')
+        montecarlo.end_episode()    
         print('>'*40, f'Episode {i+1} is finished in {n} steps')
-        time.sleep(2)
+
+    montecarlo.save('montecarlo')
+    rl_minihack.stop_rendering()
