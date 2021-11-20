@@ -2,129 +2,128 @@ import gym
 import minihack
 from nle import nethack
 
-import rl_minihack
-
 import numpy as np
 
 from copy import deepcopy
-import time
+import rl_minihack
 
 import torch
-from torch import nn
 
 from os.path import join, split
+
+from dqn import *
+
 _HERE = split(__file__)[0]
-
-
-class QNetwork(nn.Module):
-
-    def __init__(self, num_actions) -> None:
-        super().__init__()
-
-        self.model = nn.Sequential(
-                                    nn.Conv2d(1, 64, kernel_size=3, padding=1, stride=1), nn.PReLU(),
-                                    nn.Conv2d(64, 128, kernel_size=3, padding=1, stride=1), nn.PReLU(),
-                                    nn.AdaptiveAvgPool2d(1),
-                                    nn.Flatten(),
-                                    nn.Linear(128, 64),
-                                    nn.Tanh(),
-                                    nn.Linear(64, num_actions),
-                                    nn.PReLU()
-                                    )
-
-    def forward(self, x):
-        # since the image is just matrix, we need to add batch and channel dimensions,
-        # and change type from byte to float
-        prob = self.model(x)
-        return prob
-
 
 
 class DeepSarsa:
     """ Possible observations:
-    
+
     ['glyphs', 'chars', 'colors', 'specials', 'glyphs_crop', 'pixel'
     'chars_crop', 'colors_crop', 'specials_crop', 'blstats', 'message']
     """
     _STATE = 'chars_crop'
 
-    def __init__(self, actions, alpha, gamma, eps):
-        self.actions = actions
-        self.alpha = alpha
-        self.gamma = gamma
-        self.eps = eps
+    def __init__(self, input_channels, actions, alpha, c=55, gamma=0.9, eps=0.7, t=1024, capacity=1024, bs=32, device='cpu'):
+        self.actions = actions  # set of all possible actions
+        self.alpha = alpha  # learning rate, used for QNetwork
+        self.gamma = gamma  # gamma used to estimate state-action function
+        self.eps = eps      # probability of picking a random action versus a greedy one
 
-        self.Q = QNetwork(num_actions=len(actions)) # Q-Network
-        self.Q_prime = deepcopy(self.Q)             # The same network used to estimate ground truth values
+        self.bs = bs
+        self.c = c
+        self.t = t
+
+        self.device = device
+
+        self.buffer = ExperienceReplay(capacity)
+
+        self.Q = QNetwork(input_channels=input_channels,
+                          num_actions=len(actions)).to(device)  # Q-Network
+        # The same network used to estimate ground truth values
+        self.Q_prime = deepcopy(self.Q).to(device).eval()
         self.opt = torch.optim.SGD(self.Q.parameters(), lr=self.alpha)
         self.i = 0  # counter used to trigger the update of Q_prime with Q
 
-        self.sar = []   # stands for state-action-reward
+        self.sar = []
 
-    def _action_value(self, state, action, q:bool=True):
+    def _action_value(self, state, action=None, q: bool = True):
         """ if q is True, the `self.Q` network is used, otherwise, `self.Q_prime` is used"""
         Q = self.Q if q else self.Q_prime
-        state = torch.tensor(state).unsqueeze(0).unsqueeze(0).float()
-        value = Q(state)[:, action]
-        return value if q else value.item()
+        state = state.float().unsqueeze(1)
+        # print(state.shape)
+        # exit(0)
+        n = state.shape[0]
+        if action is not None:
+            value = Q(state.to(self.device))[list(range(n)), action].cpu()
+        else:
+            value = Q(state.to(self.device)).cpu()
+        return value
 
     def _get_action(self, state, eps):
-        """ 
-        - state: the state at which the age is.
-        - eps: probability of picking a random action. If set to 0, the greedy action is ALWAYS chosen.
-        """
         with torch.no_grad():
-            if np.random.rand() < eps:
+            if np.random.rand() < eps:  # * 0.5*(np.cos(2 * np.pi * self.i/self.t)+1):
                 return np.random.choice(self.actions)
-            qs = {(action, self._action_value(state=state, action=action)) for action in self.actions}
-            action = max(qs, key = lambda x: x[1])
-            return action[0]
+            actions = self._action_value(state=state, q=False).argmax(dim=1)
+            return actions
 
-    def _step(self, done:bool):
-        gt = self.sar[-1][-1]
-        if not done:
-            gt += self.gamma * self._action_value(state=self.sar[1][0], action=self.sar[1][1], q=False)
-        pred = self._action_value(state=self.sar[0][0], action=self.sar[0][1])
-
-        # update Q
-        self.opt.zero_grad()
-        loss = (pred-gt).pow(2)
-        loss.backward()
-        self.opt.step()
-        return loss
-
-    def update(self, reward, done:bool):
+    def update(self, reward):
         """ Update state-action value of previous (state, action).
-        
+
+        - `next_state`: the new state.
         - `reward`: reward received upon the transaction to `next_state` from previous state.
-        - `done`: boolean specifying whether the episode ended.
         """
         self.sar[-1][-1] = reward
         if len(self.sar) < 2:
             return
 
-        loss = self._step(False)
+        # register history: state, action, reward, state, action
+        state, action, reward, next_state, next_action = (
+            *self.sar[0], *self.sar[1][:-1])
 
-        if self.i == 100:
-            # update Q_prime
-            self.Q_prime = deepcopy(self.Q)
-            self.i = 0
+        self.buffer.append((
+            state.cpu().numpy(),
+            action,
+            np.array(reward),
+            next_state.cpu().numpy(),
+            next_action)
+        )
+
+        # sample batch_size
+        states, actions, rewards, next_states, next_actions = self.buffer.sample(
+            self.bs)
+
+        # compute loss
+        gt = rewards + self.gamma * \
+            self._action_value(next_states.squeeze(1), next_actions, q=False)
+        pred = self._action_value(states.squeeze(1), actions, q=True)
+        loss = (pred - gt).pow(2).mean()
+
+        # update Q
+        self.opt.zero_grad()
+        loss.backward()
+        self.opt.step()
+
+        if self.i % self.c == 0:
+            # update Q_prim
+            self.Q_prime = deepcopy(self.Q).eval()
         self.i += 1
-            
+
         del self.sar[0]
 
-        if done:
-            self._step(True)
+        try:
+            return loss.item()
+        except:
+            pass
 
-        return loss.item()
-
-
-    def take_action(self, current_state):
-        """ Choose an eps-greedy action to be taken when current state is `current_state`. """
-        current_state = tuple(map(tuple, current_state[self._STATE]))
-        action = self._get_action(current_state, self.eps)
-        self.sar.append([current_state, action, 0])
-        return action
+    def take_action(self, current_state, eval=False):
+        """ Choose an eps-greedy action to be taken when the current state is `current_state`. """
+        current_state = torch.from_numpy(
+            np.array(current_state[self._STATE])).unsqueeze(0)
+        action = self._get_action(current_state, self.eps if not eval else 0)
+        if not eval:
+            self.sar.append([current_state, action, 0])
+        return action.item()
 
     def save(self, path):
         """ Load state-action value q-network in `path`.npy """
@@ -133,7 +132,7 @@ class DeepSarsa:
 
     def load(self, path):
         """ Load state-action value q-network.
-        
+
         If it doesn't exist, use the random network.
         """
 
@@ -142,12 +141,13 @@ class DeepSarsa:
         except:
             print("=============>  No saved learner is found under:", path)
 
+
 if __name__ == '__main__':
-    ALPHA = 1e-4
+    ALPHA = 1e-3
     GAMMA = 9e-1
-    EPS = 5e-1
-    ITERS = 2
-    
+    EPS = 3e-1
+    ITERS = 100
+
     env = gym.make(
         id="MiniHack-Room-5x5-v0",
         max_episode_steps=100_000_000,
@@ -156,7 +156,8 @@ if __name__ == '__main__':
         observation_keys=('chars_crop', 'pixel')
     )
 
-    deep_sarsa = DeepSarsa(list(range(env.action_space.n)), ALPHA, GAMMA, EPS)
+    deep_sarsa = DeepSarsa(input_channels=1, actions=list(
+        range(env.action_space.n)), alpha=ALPHA, gamma=GAMMA, eps=EPS)
     deep_sarsa.load('deep_sarsa')
 
     for i in range(ITERS):
@@ -168,12 +169,12 @@ if __name__ == '__main__':
             n += 1
             action = deep_sarsa.take_action(state)
             state, reward, done, info = env.step(action)
-            loss = deep_sarsa.update(reward, done)                
+            loss = deep_sarsa.update(reward)
             env.render(state)
-            
+
             print(f'==== {n=}, {loss=}')
 
-        print('>'*20, f'Episode {i+1} is finished in {n} steps')
+        print('>'*40, f'Episode {i+1} is finished in {n} steps')
 
     rl_minihack.stop_rendering()
     deep_sarsa.save('deep_sarsa')
