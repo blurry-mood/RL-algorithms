@@ -40,21 +40,24 @@ def render(obs, sleep=1e-2):
     global im1
 
     try:
-
         img = obs['pixel']
         mean = img.mean(axis=2)==0
         img = img[~np.all(mean, axis=1), :]
         img = img[:, ~np.all(mean, axis=0)]
         if im1 is None:
             im1 = _start_rendering(img)
+        elif im1 == -1:
+            pass
         else:
             im1.set_data(img)
-            plt.pause(sleep)
+        plt.pause(sleep)
     except:
         pass
 
 def on_close(event):
-    stop_rendering()
+    global im1
+    plt.ioff() # due to infinite loop, this gets never called.
+    im1 = -1
 
 def stop_rendering():
     global im1
