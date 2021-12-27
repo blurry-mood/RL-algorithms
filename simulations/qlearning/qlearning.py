@@ -101,4 +101,4 @@ def test_robot_warehouse():
             agent.save(f'qlearner{i}')
 
 
-test_minihack()
+test_robot_warehouse()
