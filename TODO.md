@@ -1,4 +1,5 @@
 # Next steps
+- [ ] Implement Double/Dueling DQN.
 - [ ] Clone deep models in policy-based methods for more stabilitiy in learning.
 - [ ] Train using batches for REINFORCE and ActorCritic.
 - [ ] Document the code.
