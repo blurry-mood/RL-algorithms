@@ -3,3 +3,4 @@
 - [ ] Train using batches for REINFORCE and ActorCritic.
 - [ ] Document the code.
 - [ ] Enable simulation from command-line.
+- [ ] Provide an abstract PyTorch Module class for users to extend, based on each algorithm requirements.
