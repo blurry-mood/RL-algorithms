@@ -36,7 +36,9 @@ class Reinforce(Agent):
         # if np.random.rand() < self.eps:
         #     return torch.from_numpy(np.random.choice(list(self.actions.keys()), size=(state.shape[0],)))
         with torch.no_grad():
+            self.network.eval()
             x = self.softmax(self._policy(state=state)*(1 - self.eps))
+            self.network.train()
             action = Categorical(probs=x).sample()
             return action
 
@@ -82,13 +84,10 @@ class Reinforce(Agent):
         states = torch.cat(states, dim=0).to(self.device)
         actions = torch.cat(actions, dim=0).to(self.device)
         returns = torch.from_numpy(np.array(returns)).float().to(self.device)
-        gammas = torch.from_numpy(np.array(
-            [self.gamma**i for i in range(returns.shape[0])])).float().to(self.device)
 
         # compute logits & loss
         logits = self._policy(states)
-        loss = (cross_entropy(logits, actions, reduction='none')
-                * (returns*gammas)).sum()
+        loss = (cross_entropy(logits, actions, reduction='none') * returns).sum()
 
         # optimize
         self.optim.zero_grad()
