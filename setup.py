@@ -4,7 +4,7 @@ from os import path
 
 here = path.abspath(path.dirname(__file__))
 
-VERSION = 'v0.0.2'
+VERSION = 'v0.0.3'
 
 # Read the requirements from the TXT file
 with open(path.join(here, 'requirements.txt')) as f:
